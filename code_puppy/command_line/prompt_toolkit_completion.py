@@ -14,7 +14,7 @@ from prompt_toolkit import PromptSession
 from prompt_toolkit.completion import Completer, Completion, merge_completers
 from prompt_toolkit.filters import is_searching
 from prompt_toolkit.formatted_text import FormattedText
-from prompt_toolkit.history import FileHistory
+from prompt_toolkit.history import FileHistory, History
 from prompt_toolkit.key_binding import KeyBindings
 from prompt_toolkit.keys import Keys
 from prompt_toolkit.layout.processors import Processor, Transformation
@@ -40,6 +40,69 @@ from code_puppy.config import (
     get_puppy_name,
     get_value,
 )
+
+
+class UserOnlyHistory(History):
+    """
+    Custom History implementation that only stores and displays user-typed commands.
+    This prevents system-generated prompts from appearing in the command history
+    when cycling with up/down arrows.
+    """
+
+    def __init__(self, file_history: FileHistory):
+        """Initialize with a FileHistory instance to delegate storage to."""
+        self._file_history = file_history
+        self._user_input_mode = True  # Track if current input is from user
+
+    def load_history_strings(self):
+        """Load history entries from the file, filtering for user commands only."""
+        # Load all entries from file history
+        for entry in self._file_history.load_history_strings():
+            # Only include entries that don't look like system-generated prompts
+            # We filter out very long multi-line prompts that are typically system-generated
+            if entry and not self._is_system_generated(entry):
+                yield entry
+
+    def store_string(self, string: str) -> None:
+        """Store a string to history only if it's user-generated."""
+        # Only store if we're in user input mode and it's not system-generated
+        if self._user_input_mode and not self._is_system_generated(string):
+            self._file_history.store_string(string)
+
+    def _is_system_generated(self, text: str) -> bool:
+        """
+        Heuristic to detect system-generated prompts.
+        System-generated prompts are typically:
+        - Very long (multi-paragraph)
+        - Contain numbered steps with multiple paragraphs
+        - Start with phrases like "Generate a comprehensive"
+        """
+        if not text:
+            return False
+
+        # Count newlines - system prompts tend to have many
+        newline_count = text.count("\n")
+        if newline_count > 10:  # Arbitrary threshold for multi-paragraph prompts
+            return True
+
+        # Check for common system prompt patterns
+        system_prompt_indicators = [
+            "Generate a comprehensive",
+            "Follow these steps:",
+            "1. Discover",
+            "2. Analyze",
+            "3. Generate",
+        ]
+        text_start = text[:200].strip()  # Check first 200 chars
+        for indicator in system_prompt_indicators:
+            if indicator in text_start:
+                return True
+
+        return False
+
+    def set_user_input_mode(self, is_user: bool) -> None:
+        """Set whether current input is from user or system-generated."""
+        self._user_input_mode = is_user
 
 
 class SetCompleter(Completer):
@@ -310,7 +373,12 @@ def get_prompt_with_active_model(base: str = ">>> "):
 async def get_input_with_combined_completion(
     prompt_str=">>> ", history_file: Optional[str] = None
 ) -> str:
-    history = FileHistory(history_file) if history_file else None
+    # Use custom UserOnlyHistory to filter system-generated prompts
+    if history_file:
+        file_history = FileHistory(history_file)
+        history = UserOnlyHistory(file_history)
+    else:
+        history = None
     completer = merge_completers(
         [
             FilePathCompleter(symbol="@"),

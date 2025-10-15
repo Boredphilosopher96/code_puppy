@@ -16,6 +16,7 @@ from code_puppy.command_line.prompt_toolkit_completion import (
     CDCompleter,
     FilePathCompleter,
     SetCompleter,
+    UserOnlyHistory,
     get_input_with_combined_completion,
 )
 
@@ -476,7 +477,8 @@ async def test_get_input_with_combined_completion_with_history(
     result = await get_input_with_combined_completion(history_file=history_path)
 
     mock_file_history.assert_called_once_with(history_path)
-    assert mock_prompt_session_cls.call_args[1]["history"] == mock_history_instance
+    # History is now wrapped in UserOnlyHistory
+    assert isinstance(mock_prompt_session_cls.call_args[1]["history"], UserOnlyHistory)
     mock_update_model.assert_called_once_with("input with history")
     assert result == "processed history input"
 
